@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codex Switch</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f3f4f6;
+            --ink: #1f2a2a;
+            --muted: #667572;
+            --panel: #ffffff;
+            --line: #dde3e3;
+            --accent: #1f5f52;
+            --accent-soft: #d8ece5;
+            --warn: #b46b1f;
+            --warn-soft: #f4e4ca;
+            --danger: #a13c2f;
+            --danger-soft: #f7ddd7;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Avenir Next", "Segoe UI", "PingFang SC", sans-serif;
+            color: var(--ink);
+            background: var(--bg);
+        }
+
+        main {
+            width: min(1220px, calc(100% - 28px));
+            margin: 28px auto 40px;
+            display: grid;
+            gap: 18px;
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+        }
+
+        .toolbar-panel {
+            padding: 18px 20px;
+        }
+
+        .toolbar,
+        .row-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .toolbar button,
+        .row-actions button {
+            appearance: none;
+            border: 1px solid transparent;
+            border-radius: 999px;
+            cursor: pointer;
+            font: inherit;
+            padding: 9px 14px;
+            transition: opacity .18s ease, background-color .18s ease;
+        }
+
+        button.primary {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        button.secondary {
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        button.ghost {
+            background: transparent;
+            color: var(--ink);
+            border-color: var(--line);
+        }
+
+        button.warn {
+            background: var(--warn-soft);
+            color: #8b5412;
+        }
+
+        button.danger {
+            background: var(--danger-soft);
+            color: var(--danger);
+        }
+
+        button:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .toolbar-total {
+            margin-left: auto;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: #f7f9f9;
+            color: var(--muted);
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        .message {
+            display: none;
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 20;
+            min-width: 240px;
+            max-width: min(420px, calc(100vw - 32px));
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            background: #ffffff;
+            font-size: 13px;
+            line-height: 1.5;
+            box-shadow: 0 12px 30px rgba(31, 42, 42, 0.14);
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .message.success {
+            border-color: #cfe3dd;
+            background: #f3faf7;
+            color: var(--accent);
+        }
+
+        .message.error {
+            border-color: #efd2cb;
+            background: #fdf6f4;
+            color: var(--danger);
+        }
+
+        .table-panel {
+            overflow: hidden;
+        }
+
+        .account-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .account-table th {
+            padding: 14px 18px;
+            text-align: left;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--muted);
+            background: #f7f9f9;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .account-table td {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--line);
+            vertical-align: middle;
+        }
+
+        .account-table tbody tr.current {
+            background: #eef7f4;
+        }
+
+        .account-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .email-cell {
+            display: flex;
+            align-items: center;
+            font-size: 15px;
+            font-weight: 700;
+            word-break: break-word;
+        }
+
+        .quota-cell,
+        .reset-cell {
+            white-space: nowrap;
+        }
+
+        .row-actions {
+            justify-content: flex-end;
+        }
+
+        .empty {
+            padding: 34px 24px;
+            text-align: center;
+            color: var(--muted);
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <section class="panel toolbar-panel">
+            <div class="toolbar">
+                <button class="secondary" id="reload-btn">重载目录</button>
+                <button class="primary" id="refresh-token-btn">全部刷新 Token</button>
+                <button class="warn" id="refresh-quota-btn">全部刷新 Quota</button>
+                <button class="ghost" id="logout-btn">退出</button>
+                <div class="toolbar-total" id="account-total">共 0 个账号</div>
+            </div>
+        </section>
+
+        <p class="message" id="message"></p>
+
+        <section class="panel table-panel" id="account-list"></section>
+    </main>
+
+    <script>
+        const passwordStorageKey = 'codex_proxy_password';
+        const dashboardRefreshIntervalMs = 30000;
+        const countdownRefreshIntervalMs = 60000;
+        const state = { accounts: [], busy: false };
+        const message = document.getElementById('message');
+        const accountList = document.getElementById('account-list');
+        const accountTotal = document.getElementById('account-total');
+        const reloadButton = document.getElementById('reload-btn');
+        const refreshTokenButton = document.getElementById('refresh-token-btn');
+        const refreshQuotaButton = document.getElementById('refresh-quota-btn');
+        const logoutButton = document.getElementById('logout-btn');
+        let messageTimer = 0;
+        let dashboardRefreshing = false;
+
+        reloadButton.addEventListener('click', () => perform('/api/accounts/refresh', { method: 'POST' }));
+        refreshTokenButton.addEventListener('click', () => perform('/api/accounts/refresh-token', { method: 'POST' }));
+        refreshQuotaButton.addEventListener('click', () => perform('/api/accounts/refresh-quota', { method: 'POST' }));
+        logoutButton.addEventListener('click', logout);
+        accountList.addEventListener('click', handleTableAction);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) refreshDashboardSilently();
+        });
+
+        async function request(path, options = {}) {
+            const headers = { ...(options.headers || {}) };
+            if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+            if (localStorage.getItem(passwordStorageKey)) headers['X-Proxy-Password'] = localStorage.getItem(passwordStorageKey);
+            const response = await fetch(path, { ...options, headers });
+            const payload = await response.json().catch(() => ({ message: '响应解析失败' }));
+            if (!response.ok || payload.code !== 200) throw new Error(payload.message || `请求失败: ${response.status}`);
+            return payload.data;
+        }
+
+        function setMessage(text, isError = true) {
+            window.clearTimeout(messageTimer);
+            if (!text) {
+                message.className = 'message';
+                message.textContent = '';
+                return;
+            }
+            message.className = `message show ${isError ? 'error' : 'success'}`;
+            message.textContent = text;
+            messageTimer = window.setTimeout(() => {
+                message.className = 'message';
+                message.textContent = '';
+            }, 3200);
+        }
+
+        function escapeHTML(text) {
+            return String(text || '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+        }
+
+        function formatRemainingTime(target, now) {
+            const diff = Math.max(0, target - now);
+            const days = Math.floor(diff / 86400000);
+            const hours = Math.floor(diff % 86400000 / 3600000);
+            return `${days}d${String(hours).padStart(2, '0')}h`;
+        }
+
+        function summarizeReport(report) {
+            if (!report) return '';
+            const parts = [];
+            if (Array.isArray(report.succeeded) && report.succeeded.length) parts.push(`成功 ${report.succeeded.length} 个`);
+            if (Array.isArray(report.failed) && report.failed.length) parts.push(`失败 ${report.failed.length} 个`);
+            const summary = parts.join('，');
+            if (!summary) return '';
+            if (!report.failed || !report.failed.length) return summary;
+            return `${summary}。${report.failed[0]}`;
+        }
+
+        function applyDashboard(data) {
+            state.accounts = Array.isArray(data.accounts) ? data.accounts : [];
+            renderToolbar();
+            renderAccounts();
+        }
+
+        function renderAccounts() {
+            if (!state.accounts.length) {
+                accountList.innerHTML = '<div class="empty">当前没有可展示的账号，请先检查 accounts 目录。</div>';
+                return;
+            }
+            const now = Date.now();
+            accountList.innerHTML = `
+                <table class="account-table">
+                    <thead>
+                        <tr>
+                            <th>邮箱</th>
+                            <th>用量</th>
+                            <th>重置</th>
+                            <th>Token</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${state.accounts.slice().sort((left, right) => {
+                if (left.current !== right.current) return left.current ? -1 : 1;
+                const leftWindow = left.quota && left.quota.rate_limit ? left.quota.rate_limit.primary_window : null;
+                const rightWindow = right.quota && right.quota.rate_limit ? right.quota.rate_limit.primary_window : null;
+                const leftQuota = !leftWindow ? -1 : Math.round(Math.max(0, Math.min(100, 100 - Number(leftWindow.used_percent || 0))));
+                const rightQuota = !rightWindow ? -1 : Math.round(Math.max(0, Math.min(100, 100 - Number(rightWindow.used_percent || 0))));
+                if (leftQuota !== rightQuota) return rightQuota - leftQuota;
+                const leftReset = !leftWindow || !leftWindow.reset_at ? Number.POSITIVE_INFINITY : Math.max(0, leftWindow.reset_at * 1000 - now);
+                const rightReset = !rightWindow || !rightWindow.reset_at ? Number.POSITIVE_INFINITY : Math.max(0, rightWindow.reset_at * 1000 - now);
+                if (leftReset !== rightReset) return leftReset - rightReset;
+                return (left.email || left.name).localeCompare(right.email || right.name, 'zh-CN');
+            }).map((account) => {
+                const window = account.quota && account.quota.rate_limit ? account.quota.rate_limit.primary_window : null;
+                const quota = !window ? '' : `${Math.round(Math.max(0, Math.min(100, 100 - Number(window.used_percent || 0))))}%`;
+                const tokenExpiresAt = account.tokenExpiresAt ? new Date(account.tokenExpiresAt).getTime() : 0;
+                return `
+                                <tr class="${account.current ? 'current' : ''}">
+                                    <td>
+                                        <div class="email-cell">
+                                            <span>${escapeHTML(account.email || account.name)}</span>
+                                        </div>
+                                    </td>
+                                    <td class="quota-cell">${quota || '未查询'}</td>
+                                    <td class="reset-cell">${!window || !window.reset_at ? '时间未知' : formatRemainingTime(window.reset_at * 1000, now)}</td>
+                                    <td class="reset-cell">${!tokenExpiresAt ? '时间未知' : formatRemainingTime(tokenExpiresAt, now)}</td>
+                                    <td>
+                                        <div class="row-actions">
+                                            <button class="${account.current ? 'ghost' : 'primary'}" data-action="switch" data-name="${escapeHTML(account.name)}" ${account.current || state.busy ? 'disabled' : ''}>切换</button>
+                                            <button class="secondary" data-action="token" data-name="${escapeHTML(account.name)}" ${state.busy ? 'disabled' : ''}>刷新 Token</button>
+                                            <button class="warn" data-action="quota" data-name="${escapeHTML(account.name)}" ${state.busy ? 'disabled' : ''}>刷新 Quota</button>
+                                            <button class="danger" data-action="delete" data-name="${escapeHTML(account.name)}" ${state.busy ? 'disabled' : ''}>删除</button>
+                                        </div>
+                                    </td>
+                                </tr>`;
+            }).join('')}
+                    </tbody>
+                </table>`;
+        }
+
+        function renderToolbar() {
+            const hasAccounts = state.accounts.length > 0;
+            accountTotal.textContent = `共 ${state.accounts.length} 个账号`;
+            reloadButton.disabled = state.busy;
+            refreshTokenButton.disabled = state.busy || !hasAccounts;
+            refreshQuotaButton.disabled = state.busy || !hasAccounts;
+            logoutButton.disabled = state.busy;
+        }
+
+        function setBusy(busy) {
+            state.busy = busy;
+            renderToolbar();
+            renderAccounts();
+        }
+
+        async function ensurePassword() {
+            if (localStorage.getItem(passwordStorageKey)) return true;
+            const input = window.prompt('输入登录密码');
+            if (!input) {
+                setMessage('未登录');
+                return false;
+            }
+            await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ password: input }), headers: { 'X-Proxy-Password': input } });
+            localStorage.setItem(passwordStorageKey, input);
+            return true;
+        }
+
+        async function perform(path, options = {}, fallbackMessage = '') {
+            try {
+                if (!await ensurePassword()) return;
+                setBusy(true);
+                const data = await request(path, options);
+                applyDashboard(data);
+                setMessage([data.message || fallbackMessage, summarizeReport(data.report)].filter(Boolean).join(' '), false);
+            } catch (error) {
+                if (error.message === 'Authentication failed') {
+                    logout();
+                    if (await ensurePassword()) return perform(path, options, fallbackMessage);
+                    return;
+                }
+                setMessage(error.message);
+            } finally {
+                setBusy(false);
+            }
+        }
+
+        async function handleTableAction(event) {
+            const button = event.target.closest('button[data-action]');
+            if (!button || state.busy) return;
+            const name = button.dataset.name;
+            if (button.dataset.action === 'switch') return perform('/api/accounts/select', { method: 'POST', body: JSON.stringify({ name }) }, `已切换到 ${name}`);
+            if (button.dataset.action === 'token') return perform(`/api/accounts/${encodeURIComponent(name)}/refresh-token`, { method: 'POST' }, `${name} 的 Token 已刷新`);
+            if (button.dataset.action === 'quota') return perform(`/api/accounts/${encodeURIComponent(name)}/refresh-quota`, { method: 'POST' }, `${name} 的 Quota 已刷新`);
+            if (button.dataset.action === 'delete') {
+                if (!window.confirm(`确认删除 ${name} 吗？会同时删除账号文件和 Quota 缓存。`)) return;
+                return perform(`/api/accounts/${encodeURIComponent(name)}`, { method: 'DELETE' }, `${name} 已删除`);
+            }
+        }
+
+        async function refreshDashboardSilently() {
+            if (dashboardRefreshing || state.busy || document.hidden || !localStorage.getItem(passwordStorageKey)) return;
+            dashboardRefreshing = true;
+            try {
+                applyDashboard(await request('/api/accounts', { method: 'GET' }));
+            } catch (error) {
+                if (error.message === 'Authentication failed') logout();
+            } finally {
+                dashboardRefreshing = false;
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem(passwordStorageKey);
+            state.accounts = [];
+            renderToolbar();
+            renderAccounts();
+            setMessage('');
+        }
+
+        renderToolbar();
+        renderAccounts();
+        window.setInterval(refreshDashboardSilently, dashboardRefreshIntervalMs);
+        window.setInterval(() => {
+            if (!document.hidden) renderAccounts();
+        }, countdownRefreshIntervalMs);
+        perform('/api/accounts', { method: 'GET' });
+    </script>
+</body>
+
+</html>

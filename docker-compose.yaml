@@ -1,0 +1,10 @@
+services:
+  codexswitch:
+    image: "docker.io/bestrui/codexswitch:latest"
+    container_name: "codexswitch"
+    network_mode: bridge
+    ports:
+      - "8080:8080/tcp"
+    restart: "always"
+    volumes:
+      - "~/data/codexswitch:/app/data"
