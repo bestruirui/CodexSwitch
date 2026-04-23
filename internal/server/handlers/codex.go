@@ -29,6 +29,11 @@ var codexProxy = &httputil.ReverseProxy{
 		pr.Out.Host = "chatgpt.com"
 		pr.Out.URL.Path = "/backend-api/codex" + strings.TrimPrefix(pr.In.URL.Path, "/api/codex")
 		pr.Out.URL.RawPath = "/backend-api/codex" + strings.TrimPrefix(pr.In.URL.EscapedPath(), "/api/codex")
+
+		pr.Out.Header.Del("X-Forwarded-Host")
+		pr.Out.Header.Del("X-Forwarded-Server")
+		pr.Out.Header.Del("X-Real-IP")
+		pr.Out.Header["X-Forwarded-For"] = nil
 	},
 	ModifyResponse: func(response *http.Response) error {
 		if response.StatusCode != http.StatusTooManyRequests {
