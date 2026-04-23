@@ -330,6 +330,7 @@
                 const window = account.quota && account.quota.rate_limit ? account.quota.rate_limit.primary_window : null;
                 const quota = !window ? '' : `${Math.round(Math.max(0, Math.min(100, 100 - Number(window.used_percent || 0))))}%`;
                 const tokenExpiresAt = account.tokenExpiresAt ? new Date(account.tokenExpiresAt).getTime() : 0;
+                const tokenRefreshStatusCode = Number(account.tokenRefreshStatusCode || 0);
                 return `
                                 <tr class="${account.current ? 'current' : ''}">
                                     <td>
@@ -339,7 +340,7 @@
                                     </td>
                                     <td class="quota-cell">${quota || '未查询'}</td>
                                     <td class="reset-cell">${!window || !window.reset_at ? '时间未知' : formatRemainingTime(window.reset_at * 1000, now)}</td>
-                                    <td class="reset-cell">${!tokenExpiresAt ? '时间未知' : formatRemainingTime(tokenExpiresAt, now)}</td>
+                                    <td class="reset-cell">${tokenRefreshStatusCode > 0 ? tokenRefreshStatusCode : !tokenExpiresAt ? '时间未知' : formatRemainingTime(tokenExpiresAt, now)}</td>
                                     <td>
                                         <div class="row-actions">
                                             <button class="${account.current ? 'ghost' : 'primary'}" data-action="switch" data-name="${escapeHTML(account.name)}" ${account.current || state.busy ? 'disabled' : ''}>切换</button>
@@ -393,6 +394,13 @@
                     logout();
                     if (await ensurePassword()) return perform(path, options, fallbackMessage);
                     return;
+                }
+                if (path !== '/api/accounts') {
+                    try {
+                        applyDashboard(await request('/api/accounts', { method: 'GET' }));
+                    } catch (refreshError) {
+                        if (refreshError.message === 'Authentication failed') logout();
+                    }
                 }
                 setMessage(error.message);
             } finally {

@@ -36,16 +36,17 @@ type accountMeta struct {
 }
 
 type loadedAccount struct {
-	Name          string
-	FilePath      string
-	Email         string
-	Plan          string
-	AccountID     string
-	Authorization string
-	LastRefresh   string
-	TokenExpires  string
-	HasRefresh    bool
-	Auth          accountFile
+	Name                   string
+	FilePath               string
+	Email                  string
+	Plan                   string
+	AccountID              string
+	Authorization          string
+	LastRefresh            string
+	TokenExpires           string
+	TokenRefreshStatusCode int
+	HasRefresh             bool
+	Auth                   accountFile
 }
 
 type accountState struct {
@@ -53,13 +54,14 @@ type accountState struct {
 }
 
 type AccountView struct {
-	Name           string         `json:"name"`
-	Email          string         `json:"email"`
-	Plan           string         `json:"plan"`
-	Current        bool           `json:"current"`
-	LastRefresh    string         `json:"lastRefresh,omitempty"`
-	TokenExpiresAt string         `json:"tokenExpiresAt,omitempty"`
-	Quota          *usageResponse `json:"quota,omitempty"`
+	Name                   string         `json:"name"`
+	Email                  string         `json:"email"`
+	Plan                   string         `json:"plan"`
+	Current                bool           `json:"current"`
+	LastRefresh            string         `json:"lastRefresh,omitempty"`
+	TokenExpiresAt         string         `json:"tokenExpiresAt,omitempty"`
+	TokenRefreshStatusCode int            `json:"tokenRefreshStatusCode,omitempty"`
+	Quota                  *usageResponse `json:"quota,omitempty"`
 }
 
 type AccountStore struct {
@@ -91,13 +93,14 @@ func (s *AccountStore) List() ([]AccountView, string, error) {
 	items := make([]AccountView, 0, len(s.accounts))
 	for _, account := range s.accounts {
 		items = append(items, AccountView{
-			Name:           account.Name,
-			Email:          account.Email,
-			Plan:           account.Plan,
-			Current:        account.Name == s.current,
-			LastRefresh:    account.LastRefresh,
-			TokenExpiresAt: account.TokenExpires,
-			Quota:          Quotas.Peek(account.quotaKey()),
+			Name:                   account.Name,
+			Email:                  account.Email,
+			Plan:                   account.Plan,
+			Current:                account.Name == s.current,
+			LastRefresh:            account.LastRefresh,
+			TokenExpiresAt:         account.TokenExpires,
+			TokenRefreshStatusCode: account.TokenRefreshStatusCode,
+			Quota:                  Quotas.Peek(account.quotaKey()),
 		})
 	}
 	return items, s.current, nil
@@ -239,10 +242,17 @@ func (s *AccountStore) RefreshTokenByName(name string) error {
 		return err
 	}
 	if strings.TrimSpace(account.Auth.Tokens.RefreshToken) == "" {
+		s.setTokenRefreshStatusCode(name, 0)
 		return errors.New("account refresh_token is missing")
 	}
 	auth := account.Auth
 	if err := refreshAccessToken(&auth); err != nil {
+		var requestErr requestError
+		if errors.As(err, &requestErr) {
+			s.setTokenRefreshStatusCode(name, requestErr.StatusCode)
+			return err
+		}
+		s.setTokenRefreshStatusCode(name, 0)
 		return err
 	}
 	if _, err := s.updateAccountAuth(name, auth); err != nil {
@@ -405,6 +415,18 @@ func (s *AccountStore) accountByName(name string) (loadedAccount, error) {
 		}
 	}
 	return loadedAccount{}, errors.New("account not found")
+}
+
+func (s *AccountStore) setTokenRefreshStatusCode(name string, statusCode int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.accounts {
+		if s.accounts[i].Name == name {
+			s.accounts[i].TokenRefreshStatusCode = statusCode
+			return
+		}
+	}
 }
 
 func (s *AccountStore) updateAccountAuth(name string, auth accountFile) (loadedAccount, error) {
