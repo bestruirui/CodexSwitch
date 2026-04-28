@@ -3,13 +3,13 @@ package cmd
 import (
 	"fmt"
 	"net/http"
-	"time"
 
 	"codexswitch/internal/conf"
 	_ "codexswitch/internal/server/handlers"
 	"codexswitch/internal/server/middleware"
 	"codexswitch/internal/server/router"
 	"codexswitch/internal/store"
+	"codexswitch/internal/task"
 	"codexswitch/internal/utils/log"
 	"codexswitch/internal/utils/shutdown"
 	"codexswitch/static"
@@ -45,8 +45,7 @@ var startCmd = &cobra.Command{
 		if err := store.Quotas.SyncWithAccounts(); err != nil {
 			log.Warnf("initial quota cleanup failed: %v", err)
 		}
-		go refreshMissingQuotaOnStartup(stop)
-		go refreshExpiringTokens(stop)
+		go task.Run(stop)
 
 		if conf.IsDebug() {
 			log.Infof("%s run at debug mode", conf.APP_NAME)
@@ -79,58 +78,4 @@ var startCmd = &cobra.Command{
 func init() {
 	startCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./data/config.json)")
 	rootCmd.AddCommand(startCmd)
-}
-
-func refreshMissingQuotaOnStartup(stop <-chan struct{}) {
-	items, _, err := store.Accounts.List()
-	if err != nil {
-		log.Warnf("startup quota refresh skipped: %v", err)
-		return
-	}
-	for _, account := range items {
-		select {
-		case <-stop:
-			return
-		default:
-		}
-		if account.Quota != nil {
-			continue
-		}
-		if _, err := store.Quotas.RefreshByName(account.Name); err != nil {
-			log.Warnf("startup quota refresh failed for %s: %v", account.Name, err)
-		}
-	}
-}
-
-func refreshExpiringTokens(stop <-chan struct{}) {
-	timer := time.NewTimer(time.Minute)
-	defer timer.Stop()
-
-	for {
-		select {
-		case <-stop:
-			return
-		case <-timer.C:
-		}
-
-		items, _, err := store.Accounts.List()
-		if err != nil {
-			log.Warnf("scheduled token refresh skipped: %v", err)
-			timer.Reset(time.Hour)
-			continue
-		}
-		for _, account := range items {
-			if account.TokenExpiresAt == "" {
-				continue
-			}
-			expiry, err := time.Parse(time.RFC3339, account.TokenExpiresAt)
-			if err != nil || expiry.After(time.Now().Add(7*24*time.Hour)) {
-				continue
-			}
-			if err := store.Accounts.RefreshTokenByName(account.Name); err != nil {
-				log.Warnf("scheduled token refresh failed for %s: %v", account.Name, err)
-			}
-		}
-		timer.Reset(time.Hour)
-	}
 }

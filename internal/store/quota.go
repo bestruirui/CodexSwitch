@@ -145,6 +145,23 @@ func (s *QuotaStore) Peek(key string) *usageResponse {
 	return &cloned
 }
 
+func (s *QuotaStore) DueUsedQuotaResets(now time.Time) (map[string]int64, error) {
+	items, _, err := Accounts.List()
+	if err != nil {
+		return nil, err
+	}
+
+	due := make(map[string]int64)
+	for _, account := range items {
+		resetAt := quotaAutoRefreshResetAt(account.Quota)
+		if resetAt == 0 || resetAt > now.Unix() {
+			continue
+		}
+		due[account.Name] = resetAt
+	}
+	return due, nil
+}
+
 func (s *QuotaStore) Delete(key string) error {
 	key = normalizeQuotaKey(key)
 	if key == "" {
@@ -367,6 +384,33 @@ func quotaLimitReached(usage *usageResponse) bool {
 		}
 	}
 	return false
+}
+
+func quotaAutoRefreshResetAt(usage *usageResponse) int64 {
+	if usage == nil {
+		return 0
+	}
+
+	resetAt := int64(0)
+	collect := func(window *usageWindow) {
+		if window == nil || window.UsedPercent <= 0 || window.ResetAt <= 0 {
+			return
+		}
+		if resetAt == 0 || window.ResetAt < resetAt {
+			resetAt = window.ResetAt
+		}
+	}
+
+	collect(usage.RateLimit.PrimaryWindow)
+	collect(usage.RateLimit.SecondaryWindow)
+	for _, item := range usage.AdditionalRateLimits {
+		collect(item.RateLimit.PrimaryWindow)
+		collect(item.RateLimit.SecondaryWindow)
+	}
+	if usage.CodeReviewRateLimit != nil {
+		collect(usage.CodeReviewRateLimit.PrimaryWindow)
+	}
+	return resetAt
 }
 
 func writeQuotaCacheFile(filePath string, usage usageResponse) error {

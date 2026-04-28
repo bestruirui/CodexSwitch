@@ -273,11 +273,26 @@
             return String(text || '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
         }
 
-        function formatRemainingTime(target, now) {
-            const diff = Math.max(0, target - now);
+        function formatDuration(diff) {
+            diff = Math.max(0, diff);
             const days = Math.floor(diff / 86400000);
             const hours = Math.floor(diff % 86400000 / 3600000);
             return `${days}d${String(hours).padStart(2, '0')}h`;
+        }
+
+        function formatRemainingTime(target, now) {
+            return formatDuration(target - now);
+        }
+
+        function getQuotaResetRemaining(window, now) {
+            if (!window) return null;
+            if (Number(window.used_percent || 0) > 0) {
+                if (!window.reset_at) return null;
+                return Math.max(0, window.reset_at * 1000 - now);
+            }
+            if (Number(window.reset_after_seconds || 0) > 0) return Math.max(0, Number(window.reset_after_seconds) * 1000);
+            if (Number(window.limit_window_seconds || 0) > 0) return Math.max(0, Number(window.limit_window_seconds) * 1000);
+            return null;
         }
 
         function summarizeReport(report) {
@@ -322,13 +337,18 @@
                 const leftQuota = !leftWindow ? -1 : Math.round(Math.max(0, Math.min(100, 100 - Number(leftWindow.used_percent || 0))));
                 const rightQuota = !rightWindow ? -1 : Math.round(Math.max(0, Math.min(100, 100 - Number(rightWindow.used_percent || 0))));
                 if (leftQuota !== rightQuota) return rightQuota - leftQuota;
-                const leftReset = !leftWindow || !leftWindow.reset_at ? Number.POSITIVE_INFINITY : Math.max(0, leftWindow.reset_at * 1000 - now);
-                const rightReset = !rightWindow || !rightWindow.reset_at ? Number.POSITIVE_INFINITY : Math.max(0, rightWindow.reset_at * 1000 - now);
+                const leftReset = getQuotaResetRemaining(leftWindow, now);
+                const rightReset = getQuotaResetRemaining(rightWindow, now);
+                if (leftReset === null && rightReset === null) return (left.email || left.name).localeCompare(right.email || right.name, 'zh-CN');
+                if (leftReset === null) return 1;
+                if (rightReset === null) return -1;
                 if (leftReset !== rightReset) return leftReset - rightReset;
                 return (left.email || left.name).localeCompare(right.email || right.name, 'zh-CN');
             }).map((account) => {
                 const window = account.quota && account.quota.rate_limit ? account.quota.rate_limit.primary_window : null;
                 const quota = !window ? '' : `${Math.round(Math.max(0, Math.min(100, 100 - Number(window.used_percent || 0))))}%`;
+                const resetRemaining = getQuotaResetRemaining(window, now);
+                const resetText = resetRemaining === null ? '时间未知' : formatDuration(resetRemaining);
                 const tokenExpiresAt = account.tokenExpiresAt ? new Date(account.tokenExpiresAt).getTime() : 0;
                 const tokenRefreshStatusCode = Number(account.tokenRefreshStatusCode || 0);
                 return `
@@ -339,7 +359,7 @@
                                         </div>
                                     </td>
                                     <td class="quota-cell">${quota || '未查询'}</td>
-                                    <td class="reset-cell">${!window || !window.reset_at ? '时间未知' : formatRemainingTime(window.reset_at * 1000, now)}</td>
+                                    <td class="reset-cell">${resetText}</td>
                                     <td class="reset-cell">${tokenRefreshStatusCode > 0 ? tokenRefreshStatusCode : !tokenExpiresAt ? '时间未知' : formatRemainingTime(tokenExpiresAt, now)}</td>
                                     <td>
                                         <div class="row-actions">
